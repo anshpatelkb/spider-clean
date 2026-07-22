@@ -1,47 +1,54 @@
-# Homebrew install (spider-clean)
+# One-command Homebrew install
 
-## Why the short command failed
+## Why a special repo name?
 
-```text
+```bash
 brew install anshpatelkb/spider-clean/spider-clean
 ```
 
-Homebrew rewrites that tap to:
+Homebrew always clones:
 
 ```text
 https://github.com/anshpatelkb/homebrew-spider-clean
 ```
 
-Your repo is named **`spider-clean`**, not **`homebrew-spider-clean`**, so clone fails.
+So the GitHub repository **must** be named:
 
-## Correct install (use this)
-
-```bash
-# 1) clear a broken partial tap if present
-brew untap anshpatelkb/spider-clean 2>/dev/null || true
-
-# 2) tap with the real GitHub URL
-brew tap anshpatelkb/spider-clean https://github.com/anshpatelkb/spider-clean
-
-# 3) install (no --HEAD)
-brew install spider-clean
+```text
+homebrew-spider-clean
 ```
 
-## Use
+not `spider-clean`.
+
+## Setup (once)
+
+1. Open https://github.com/anshpatelkb/spider-clean/settings  
+2. **Repository name** → rename to **`homebrew-spider-clean`** → **Rename**  
+3. In GitHub Desktop, push this project (remote becomes `homebrew-spider-clean` after rename; Desktop usually follows redirects)
+
+Or set remote after rename:
 
 ```bash
-spider-clean --version
-spider-clean clean --dry-run
-spider-clean clean
+cd ~/work/S1/spider
+git remote set-url origin https://github.com/anshpatelkb/homebrew-spider-clean.git
+git push -u origin main
 ```
 
-## Optional: short tap name forever
-
-On GitHub → repo **Settings → General → Repository name**  
-rename `spider-clean` → **`homebrew-spider-clean`**.
-
-Then this works without a custom URL:
+## Install on any Mac (one command)
 
 ```bash
 brew install anshpatelkb/spider-clean/spider-clean
+```
+
+If brew asks to trust the tap:
+
+```bash
+brew trust anshpatelkb/spider-clean
+brew install anshpatelkb/spider-clean/spider-clean
+```
+
+## Upgrade
+
+```bash
+brew upgrade anshpatelkb/spider-clean/spider-clean
 ```

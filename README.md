@@ -1,19 +1,20 @@
 # Spider Clean
 
-Lightweight **Mac system cleaner** for the terminal — reclaim disk space from caches, developer tools, browsers, logs, installers, and Trash.
+Lightweight **Mac system cleaner** for the terminal.
 
 ```text
 spider-clean clean
 ```
 
-## Install (Homebrew)
+## Install (one command)
 
-Repo name is **`spider-clean`** (not `homebrew-spider-clean`), so you must pass the full GitHub URL when tapping:
+GitHub repo must be named **`homebrew-spider-clean`** (Homebrew rule).
 
 ```bash
-brew tap anshpatelkb/spider-clean https://github.com/anshpatelkb/spider-clean
-brew install spider-clean
+brew install anshpatelkb/spider-clean/spider-clean
 ```
+
+That’s it — no separate `brew tap` step.
 
 ```bash
 spider-clean --version
@@ -21,43 +22,27 @@ spider-clean clean --dry-run
 spider-clean clean
 ```
 
-### Update
+### First-time setup of this repo on GitHub
+
+1. If the repo is still named `spider-clean`, rename it:
+   - GitHub → **Settings** → **General** → **Repository name** → `homebrew-spider-clean` → **Rename**
+2. Push this project (GitHub Desktop → **Push origin**).
+
+### Local install (no Homebrew)
 
 ```bash
-brew update
-brew upgrade spider-clean
-```
-
-### Local (no Homebrew)
-
-```bash
-chmod +x install.sh bin/spider-clean lib/edge_reporter.pl
 ./install.sh
-# PREFIX=$HOME/.local ./install.sh
 ```
 
 ## Usage
 
 ```bash
-spider-clean                 # interactive menu
-spider-clean clean           # deep cleanup + desktop notification
-spider-clean clean --dry-run # preview only
-spider-clean status          # disk snapshot
-spider-clean --version
+spider-clean                 # menu
+spider-clean clean           # cleanup + notification
+spider-clean clean --dry-run
+spider-clean status
 spider-clean --help
 ```
-
-## What gets cleaned
-
-| Category | Examples |
-|----------|----------|
-| App caches | Safari helpers, system service caches |
-| Browsers | Chrome, Firefox, Brave, Edge, Dia |
-| Developer | Homebrew, npm, Yarn, pip, Xcode DerivedData, simulators, Gradle |
-| Messaging | Slack, Discord, Spotify, Zoom, VS Code caches |
-| Logs | User logs, diagnostic reports |
-| Installers | Old `.dmg` / `.pkg` in Downloads & Desktop (14+ days, 10MB+) |
-| Trash | Emptied via Finder |
 
 ## License
 

@@ -1,11 +1,14 @@
 class SpiderClean < Formula
   desc "Spider Clean - reclaim disk space and optimize local caches on macOS"
-  homepage "https://github.com/anshpatelkb/spider-clean"
-  # Pinned commit archive (works without a GitHub release tag)
-  url "https://github.com/anshpatelkb/spider-clean/archive/6967091d7bff67f8b575bf43e7392c6c33e48647.tar.gz"
-  sha256 "31980af1434ad9c5b7dcd01244f5c4a86d77ec3e320b4c19e6047c19b5f42be4"
-  version "1.0.0"
+  homepage "https://github.com/anshpatelkb/homebrew-spider-clean"
   license "MIT"
+  version "1.0.0"
+
+  # Git checkout (no tarball sha256). Repo MUST be named homebrew-spider-clean
+  # so this one-liner works:
+  #   brew install anshpatelkb/spider-clean/spider-clean
+  url "https://github.com/anshpatelkb/homebrew-spider-clean.git",
+      revision: "6967091d7bff67f8b575bf43e7392c6c33e48647"
 
   depends_on :macos
 
@@ -35,10 +38,6 @@ class SpiderClean < Formula
         spider-clean clean
         spider-clean clean --dry-run
         spider-clean status
-
-      Install / reinstall with:
-        brew tap anshpatelkb/spider-clean https://github.com/anshpatelkb/spider-clean
-        brew install spider-clean
     EOS
   end
 
