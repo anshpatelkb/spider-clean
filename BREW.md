@@ -1,54 +1,27 @@
-# One-command Homebrew install
+# Install (single command)
 
-## Why a special repo name?
-
-```bash
-brew install anshpatelkb/spider-clean/spider-clean
-```
-
-Homebrew always clones:
-
-```text
-https://github.com/anshpatelkb/homebrew-spider-clean
-```
-
-So the GitHub repository **must** be named:
-
-```text
-homebrew-spider-clean
-```
-
-not `spider-clean`.
-
-## Setup (once)
-
-1. Open https://github.com/anshpatelkb/spider-clean/settings  
-2. **Repository name** → rename to **`homebrew-spider-clean`** → **Rename**  
-3. In GitHub Desktop, push this project (remote becomes `homebrew-spider-clean` after rename; Desktop usually follows redirects)
-
-Or set remote after rename:
-
-```bash
-cd ~/work/S1/spider
-git remote set-url origin https://github.com/anshpatelkb/homebrew-spider-clean.git
-git push -u origin main
-```
-
-## Install on any Mac (one command)
+Repo must be named **homebrew-spider-clean** (already is).
 
 ```bash
 brew install anshpatelkb/spider-clean/spider-clean
 ```
 
-If brew asks to trust the tap:
+No separate `brew tap` with a custom URL. No `--HEAD`.
+
+If Homebrew asks you to trust the tap once:
 
 ```bash
 brew trust anshpatelkb/spider-clean
 brew install anshpatelkb/spider-clean/spider-clean
 ```
 
-## Upgrade
+## After install
 
 ```bash
-brew upgrade anshpatelkb/spider-clean/spider-clean
+spider-clean --version
+spider-clean clean
 ```
+
+## Release notes
+
+Version **1.3.0** is served from tag `v1.3.0`.
