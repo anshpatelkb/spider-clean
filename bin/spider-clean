@@ -25,8 +25,8 @@ Spider Clean v${SPIDER_VERSION}
 
 Usage:
   spider-clean                 Interactive overview
-  spider-clean clean           Deep cleanup of safe local caches
-  spider-clean clean --dry-run Preview what would be reclaimed
+  spider-clean clean           Scan reclaimable caches (safe — never deletes)
+  spider-clean clean --dry-run Same as clean (report only)
   spider-clean status          Quick disk / free space snapshot
   spider-clean config          Show config path
   spider-clean --help          Show this help

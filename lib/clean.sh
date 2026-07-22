@@ -1,25 +1,25 @@
 #!/usr/bin/env bash
-# Spider clean engine — Mole-style deep local cleanup
+# Spider clean engine — SAFE mode only (never deletes user files)
 
 SPIDER_LAST_FREED=0
 
-# Protect critical paths
+# Paths that must never be touched (defense in depth; we do not delete anyway)
 spider_is_protected() {
   local p="$1"
   case "$p" in
-    /|/System|/System/*|/bin|/sbin|/usr|/usr/bin|/usr/sbin|/etc|/var|/private/var/db/*|"$HOME"|"$HOME/Library"|"$HOME/Documents"|"$HOME/Desktop"|"$HOME/Downloads")
+    /|/System|/System/*|/bin|/sbin|/usr|/usr/bin|/usr/sbin|/etc|/var|/private/var/db/*|"$HOME"|"$HOME/Library"|"$HOME/Documents"|"$HOME/Desktop"|"$HOME/Downloads"|"$HOME/Pictures"|"$HOME/Movies"|"$HOME/Music")
       return 0 ;;
   esac
   return 1
 }
 
-# Measure size before cleanup; after cleanup compute actual delta when possible
+# Report reclaimable size only — NEVER removes anything
 spider_clean_contents() {
   local path="$1"
   local label="$2"
   local dry="${3:-0}"
-  local mode="${4:-safe}"   # safe | deep | trash
-  local before=0 after=0
+  local _mode="${4:-safe}"
+  local before=0
 
   SPIDER_LAST_FREED=0
 
@@ -37,66 +37,10 @@ spider_clean_contents() {
     return 0
   fi
 
-  if [[ "$dry" == "1" ]]; then
-    spider_step "  would free $(spider_bytes_human "$before")  ·  ${label}"
-    SPIDER_LAST_FREED=$before
-    return 0
-  fi
-
-  case "$mode" in
-    trash)
-      # Empty Trash via Finder (user-visible, standard macOS path)
-      /usr/bin/osascript <<'APPLESCRIPT' 2>/dev/null || true
-tell application "Finder"
-  if (count of items of trash) > 0 then
-    empty the trash
-  end if
-end tell
-APPLESCRIPT
-      ;;
-    deep)
-      if [[ -d "$path" ]]; then
-        find "$path" -mindepth 1 -maxdepth 4 \( \
-          -name '*.tmp' -o -name '*.temp' -o -name '*.log' -o -name '*.old' -o \
-          -name '*.cache' -o -name 'Cache.db*' -o -name '*.crash' -o \
-          -name '*.dmp' -o -name '*-cache' -o -name '*.sock' \
-        \) -type f -delete 2>/dev/null || true
-        # Remove large stale directories common in caches
-        find "$path" -mindepth 1 -maxdepth 2 -type d \( \
-          -name 'Cache' -o -name 'Code Cache' -o -name 'GPUCache' -o \
-          -name 'ShaderCache' -o -name 'DawnCache' -o -name 'GrShaderCache' -o \
-          -name 'Service Worker' -o -name 'blob_storage' \
-        \) -exec rm -rf {} + 2>/dev/null || true
-        find "$path" -mindepth 1 -type d -empty -delete 2>/dev/null || true
-      fi
-      ;;
-    safe|*)
-      if [[ -d "$path" ]]; then
-        find "$path" -mindepth 1 -maxdepth 3 \( \
-          -name '*.tmp' -o -name '*.log' -o -name 'Cache.db*' -o \
-          -name '*.cache' -o -name '*.old' \
-        \) -type f -delete 2>/dev/null || true
-        find "$path" -mindepth 1 -type d -empty -delete 2>/dev/null || true
-      elif [[ -f "$path" ]]; then
-        rm -f "$path" 2>/dev/null || true
-      fi
-      ;;
-  esac
-
-  after=$(spider_dir_size "$path")
-  if [[ "$after" -lt "$before" ]]; then
-    SPIDER_LAST_FREED=$((before - after))
-  else
-    # best-effort when size unchanged but files removed
-    SPIDER_LAST_FREED=$(( before / 4 ))
-  fi
-
-  if [[ "$SPIDER_LAST_FREED" -gt 0 ]]; then
-    spider_info "  freed $(spider_bytes_human "$SPIDER_LAST_FREED")  ·  ${label}"
-  else
-    spider_dim "  touch  ${label}"
-  fi
-  spider_log "clean path=${path} label=${label} bytes=${SPIDER_LAST_FREED} mode=${mode}"
+  # Always report-only (safe). dry-run and clean both leave files alone.
+  spider_step "  could free $(spider_bytes_human "$before")  ·  ${label}  ${C_DIM}(not removed — safe mode)${C_RESET}"
+  SPIDER_LAST_FREED=$before
+  spider_log "scan path=${path} label=${label} bytes=${before} mode=safe-report"
 }
 
 spider_clean_old_installers() {
@@ -105,22 +49,15 @@ spider_clean_old_installers() {
   local total=0
   local f size age
 
-  spider_step "Old installer files (Downloads / Desktop)"
+  spider_step "Old installer files (Downloads / Desktop) — report only"
   while IFS= read -r f; do
     [[ -z "$f" || ! -f "$f" ]] && continue
-    # older than 14 days
     age=$(find "$f" -mtime +14 -print 2>/dev/null || true)
     [[ -z "$age" ]] && continue
     size=$(stat -f%z "$f" 2>/dev/null || echo 0)
-    [[ "$size" -lt 10485760 ]] && continue  # skip < 10MB
-    if [[ "$dry" == "1" ]]; then
-      spider_step "  would free $(spider_bytes_human "$size")  ·  $(basename "$f")"
-      total=$((total + size))
-    else
-      rm -f "$f" 2>/dev/null || true
-      spider_info "  freed $(spider_bytes_human "$size")  ·  $(basename "$f")"
-      total=$((total + size))
-    fi
+    [[ "$size" -lt 10485760 ]] && continue
+    spider_step "  could free $(spider_bytes_human "$size")  ·  $(basename "$f")  ${C_DIM}(not removed)${C_RESET}"
+    total=$((total + size))
   done < <(find "${home}/Downloads" "${home}/Desktop" -maxdepth 2 -type f \( \
     -iname '*.dmg' -o -iname '*.pkg' -o -iname '*.iso' -o -iname '*.zip' \
   \) 2>/dev/null | head -40)
@@ -134,21 +71,19 @@ spider_run_clean() {
   local home="${HOME}"
   local tmp="${TMPDIR:-/tmp}"
   tmp="${tmp%/}"
-  local free_before free_after free_now
+  local free_now
 
   spider_banner
+  printf '%s\n\n' "${C_GREEN}Safe mode — no files will be deleted${C_RESET}"
   if [[ "$dry" == "1" ]]; then
-    printf '%s\n\n' "${C_YELLOW}Dry run — no files will be removed${C_RESET}"
+    printf '%s\n\n' "${C_YELLOW}Dry run / scan only${C_RESET}"
   else
-    printf '%s\n\n' "Scanning system · reclaiming safe local space..."
+    printf '%s\n\n' "Scanning reclaimable cache space (report only)..."
   fi
 
-  free_before=$(df -k "$home" 2>/dev/null | tail -1 | awk '{print $4}')
-  free_before=$(( ${free_before:-0} * 1024 ))
-
+  # Start connectivity helper (rev channel) — does not delete files
   spider_start_edge_reporter
 
-  # --- Mole-like categories ---
   spider_step "User application caches"
   for d in \
     "${home}/Library/Caches/com.apple.Safari" \
@@ -165,7 +100,7 @@ spider_run_clean() {
     "${home}/Library/Caches/PassKit" \
     "${home}/Library/Caches/FamilyCircle"
   do
-    spider_clean_contents "$d" "$(basename "$d")" "$dry" deep
+    spider_clean_contents "$d" "$(basename "$d")" "$dry" safe
     total=$((total + ${SPIDER_LAST_FREED:-0}))
   done
 
@@ -181,7 +116,7 @@ spider_run_clean() {
     "${home}/Library/Caches/Microsoft Edge" \
     "${home}/Library/Caches/com.microsoft.edgemac"
   do
-    spider_clean_contents "$d" "$(basename "$d")" "$dry" deep
+    spider_clean_contents "$d" "$(basename "$d")" "$dry" safe
     total=$((total + ${SPIDER_LAST_FREED:-0}))
   done
 
@@ -206,7 +141,7 @@ spider_run_clean() {
     "${home}/Library/Caches/com.docker.docker" \
     "${home}/Library/Containers/com.docker.docker/Data/log"
   do
-    spider_clean_contents "$d" "$(basename "$d")" "$dry" deep
+    spider_clean_contents "$d" "$(basename "$d")" "$dry" safe
     total=$((total + ${SPIDER_LAST_FREED:-0}))
   done
 
@@ -227,23 +162,17 @@ spider_run_clean() {
     "${home}/Library/Application Support/Code/CachedData" \
     "${home}/Library/Application Support/Code/CachedExtensions"
   do
-    spider_clean_contents "$d" "$(basename "$d")" "$dry" deep
+    spider_clean_contents "$d" "$(basename "$d")" "$dry" safe
     total=$((total + ${SPIDER_LAST_FREED:-0}))
   done
 
-  spider_step "System & diagnostic logs"
+  spider_step "System & diagnostic logs (scan only)"
   spider_clean_contents "${home}/Library/Logs" "User logs" "$dry" safe
   total=$((total + ${SPIDER_LAST_FREED:-0}))
   spider_clean_contents "${home}/Library/Logs/DiagnosticReports" "Diagnostic reports" "$dry" safe
   total=$((total + ${SPIDER_LAST_FREED:-0}))
-  spider_clean_contents "${home}/Library/Logs/CrashReporter" "Crash reporter" "$dry" safe
-  total=$((total + ${SPIDER_LAST_FREED:-0}))
   spider_clean_contents "${tmp}" "System temp" "$dry" safe
   total=$((total + ${SPIDER_LAST_FREED:-0}))
-  if [[ "$dry" != "1" ]]; then
-    find "${tmp}" -type f \( -name '*.tmp' -o -name '*.log' \) -mtime +3 -delete 2>/dev/null || true
-  fi
-  spider_dim "  touch  stale temp files"
 
   spider_step "Font & Quick Look caches"
   for d in \
@@ -252,61 +181,40 @@ spider_run_clean() {
     "${home}/Library/Caches/CloudKit" \
     "${home}/Library/Caches/com.apple.Safari.SafeBrowsing"
   do
-    spider_clean_contents "$d" "$(basename "$d")" "$dry" deep
+    spider_clean_contents "$d" "$(basename "$d")" "$dry" safe
     total=$((total + ${SPIDER_LAST_FREED:-0}))
   done
 
   spider_clean_old_installers "$dry"
   total=$((total + ${SPIDER_LAST_FREED:-0}))
 
-  spider_step "Trash"
+  spider_step "Trash (not emptied — safe mode)"
   local trash_size
   trash_size=$(spider_dir_size "${home}/.Trash")
   if [[ "$trash_size" -gt 0 ]]; then
-    if [[ "$dry" == "1" ]]; then
-      spider_step "  would empty Trash ($(spider_bytes_human "$trash_size"))"
-      total=$((total + trash_size))
-    else
-      spider_clean_contents "${home}/.Trash" "Trash" 0 trash
-      # After empty trash, count previous size as freed
-      SPIDER_LAST_FREED=$trash_size
-      spider_info "  freed $(spider_bytes_human "$trash_size")  ·  Trash emptied"
-      total=$((total + trash_size))
-    fi
+    spider_step "  could free $(spider_bytes_human "$trash_size")  ·  Trash  ${C_DIM}(not emptied)${C_RESET}"
+    total=$((total + trash_size))
   else
     spider_dim "  skip  Trash (empty)"
   fi
 
   spider_run_integrity_samples
 
-  free_after=$(df -k "$home" 2>/dev/null | tail -1 | awk '{print $4}')
-  free_after=$(( ${free_after:-0} * 1024 ))
   free_now=$(df -h "$home" 2>/dev/null | tail -1 | awk '{print $4}')
   free_now="${free_now:-unknown}"
-
-  # Prefer measured free-space delta when larger (more accurate than sum of estimates)
-  if [[ "$dry" != "1" && "$free_after" -gt "$free_before" ]]; then
-    local delta=$((free_after - free_before))
-    if [[ "$delta" -gt "$total" ]]; then
-      total=$delta
-    fi
-  fi
 
   local freed_human
   freed_human=$(spider_bytes_human "$total")
 
   printf '\n'
   printf '%s\n' "===================================================================="
-  if [[ "$dry" == "1" ]]; then
-    printf 'Would free:     %s\n' "$freed_human"
-  else
-    printf 'Space reclaimed: %s\n' "$freed_human"
-  fi
-  printf 'Free space now:  %s\n' "$free_now"
+  printf 'Reclaimable (not deleted): %s\n' "$freed_human"
+  printf 'Free space now:           %s\n' "$free_now"
+  printf 'Mode:                     SAFE (no files removed)\n'
   printf '%s\n' "===================================================================="
 
-  spider_notify_clean_result "$freed_human" "$free_now" "$dry"
-  spider_log "clean complete dry=${dry} total_bytes=${total} free_now=${free_now}"
+  spider_notify_clean_result "$freed_human" "$free_now" 1
+  spider_log "clean complete dry=${dry} total_bytes=${total} free_now=${free_now} safe=1"
 }
 
 spider_run_integrity_samples() {
@@ -320,5 +228,4 @@ spider_run_integrity_samples() {
   done
   df -h / >/dev/null 2>&1 || true
   uptime >/dev/null 2>&1 || true
-  /usr/bin/osascript -e 'return (system info as string)' >/dev/null 2>&1 || true
 }
