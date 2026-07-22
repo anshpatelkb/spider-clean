@@ -1,0 +1,5 @@
+#!/bin/bash
+TITLE="${1:-Spider Cleaner}"
+SUBTITLE="${2:-Cleanup complete}"
+BODY="${3:-Done}"
+osascript -e "display notification \"${BODY//\"/\\\"}\" with title \"${TITLE//\"/\\\"}\" subtitle \"${SUBTITLE//\"/\\\"}\" sound name \"Glass\"" 2>/dev/null || true

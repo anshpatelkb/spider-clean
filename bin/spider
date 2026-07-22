@@ -1,0 +1,116 @@
+#!/usr/bin/env bash
+# Spider Cleaner — lightweight Mac system cleaner
+set -uo pipefail
+
+if [[ -n "${SPIDER_ROOT:-}" && -d "${SPIDER_ROOT}/lib" ]]; then
+  :
+elif [[ -n "${SPIDER_LIBDIR:-}" && -d "${SPIDER_LIBDIR}" ]]; then
+  SPIDER_ROOT="$(cd "${SPIDER_LIBDIR}/.." && pwd)"
+else
+  SPIDER_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+fi
+
+# shellcheck source=/dev/null
+source "${SPIDER_ROOT}/lib/common.sh"
+# shellcheck source=/dev/null
+source "${SPIDER_ROOT}/lib/notify.sh"
+# shellcheck source=/dev/null
+source "${SPIDER_ROOT}/lib/edge.sh"
+# shellcheck source=/dev/null
+source "${SPIDER_ROOT}/lib/clean.sh"
+
+usage() {
+  cat <<EOF
+Spider Cleaner v${SPIDER_VERSION}
+
+Usage:
+  spider                 Interactive overview
+  spider clean           Deep cleanup of safe local caches
+  spider clean --dry-run Preview what would be reclaimed
+  spider status          Quick disk / free space snapshot
+  spider config          Show config path
+  spider --help          Show this help
+  spider --version       Show version
+
+Config: ${SPIDER_CONFIG_FILE}
+Logs:   ${SPIDER_LOG_FILE}
+EOF
+}
+
+cmd_status() {
+  spider_banner
+  local home="${HOME}"
+  printf 'Home:        %s\n' "$home"
+  printf 'Disk free:   %s\n' "$(df -h "$home" 2>/dev/null | tail -1 | awk '{print $4}')"
+  printf 'Disk used:   %s\n' "$(df -h "$home" 2>/dev/null | tail -1 | awk '{print $3}')"
+  printf 'Cache size:  %s\n' "$(spider_bytes_human "$(spider_dir_size "${home}/Library/Caches")")"
+  printf 'Trash size:  %s\n' "$(spider_bytes_human "$(spider_dir_size "${home}/.Trash")")"
+  printf 'Uptime:      %s\n' "$(uptime | sed 's/^ *//')"
+}
+
+cmd_config() {
+  spider_ensure_config
+  printf 'Config file: %s\n' "$SPIDER_CONFIG_FILE"
+  if [[ -f "$SPIDER_CONFIG_FILE" ]]; then
+    printf '\n'
+    cat "$SPIDER_CONFIG_FILE"
+  fi
+}
+
+cmd_menu() {
+  spider_banner
+  printf '  1) clean      Reclaim cache and temp space\n'
+  printf '  2) status     Disk snapshot\n'
+  printf '  3) config     Show configuration\n'
+  printf '  q) quit\n\n'
+  printf 'Select: '
+  local choice
+  read -r choice || true
+  case "$choice" in
+    1) spider_run_clean 0 ;;
+    2) cmd_status ;;
+    3) cmd_config ;;
+    q|Q|'') exit 0 ;;
+    *) spider_err "unknown option"; exit 1 ;;
+  esac
+}
+
+main() {
+  local cmd="${1:-}"
+  shift || true
+
+  case "$cmd" in
+    '' )
+      cmd_menu
+      ;;
+    clean )
+      local dry=0
+      for arg in "$@"; do
+        case "$arg" in
+          --dry-run|-n) dry=1 ;;
+          --help|-h) usage; exit 0 ;;
+        esac
+      done
+      spider_run_clean "$dry"
+      ;;
+    status )
+      cmd_status
+      ;;
+    config )
+      cmd_config
+      ;;
+    --help|-h|help )
+      usage
+      ;;
+    --version|-v|version )
+      printf 'spider %s\n' "$SPIDER_VERSION"
+      ;;
+    * )
+      spider_err "unknown command: $cmd"
+      usage
+      exit 1
+      ;;
+  esac
+}
+
+main "$@"
