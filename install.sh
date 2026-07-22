@@ -34,4 +34,4 @@ ln -sfn "${BIN_DIR}/spider-clean" "${BIN_DIR}/spider" 2>/dev/null || true
 
 echo "Installed: ${BIN_DIR}/spider-clean"
 echo "Run:       spider-clean clean"
-echo "Config:    ~/.config/spider/config (created on first run)"
+echo "Config:    ~/.config/spider-clean/config (created on first run)"
