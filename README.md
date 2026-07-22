@@ -10,14 +10,15 @@ After cleanup you get a **macOS notification** with how much space was reclaimed
 
 ## Install
 
-### Homebrew (after push to GitHub)
+### Homebrew
 
 Repo: **https://github.com/anshpatelkb/spider-clean**
 
 ```bash
-brew install --HEAD anshpatelkb/spider-clean/spider-clean
+brew install anshpatelkb/spider-clean/spider-clean
 ```
 
+No `--HEAD` needed (uses release **v1.0.0**).  
 Full guide: **[BREW.md](BREW.md)**
 
 ### Local (no GitHub)

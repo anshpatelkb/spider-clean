@@ -1,31 +1,12 @@
-# Publish Spider Clean to GitHub + Homebrew
+# Spider Clean — GitHub + Homebrew
 
-GitHub user: **anshpatelkb**  
 Repo: **https://github.com/anshpatelkb/spider-clean**
 
-## 1. Publish with GitHub Desktop
-
-1. Open GitHub Desktop → this folder  
-2. **Publish repository**  
-3. Name: **`spider-clean`**  
-4. Publish  
-
-Or CLI after creating the empty repo on GitHub:
+## Install (no `--HEAD`)
 
 ```bash
-cd ~/work/S1/spider
-git remote remove origin 2>/dev/null || true
-git remote add origin https://github.com/anshpatelkb/spider-clean.git
-git push -u origin main
+brew install anshpatelkb/spider-clean/spider-clean
 ```
-
-## 2. Install with Homebrew
-
-```bash
-brew install --HEAD anshpatelkb/spider-clean/spider-clean
-```
-
-## 3. Use
 
 ```bash
 spider-clean --version
@@ -33,9 +14,29 @@ spider-clean clean --dry-run
 spider-clean clean
 ```
 
-## 4. Update later
+## Push this release (if not already online)
+
+In **GitHub Desktop**:
+
+1. Open `~/work/S1/spider`
+2. **Push origin** (main branch)
+3. **Repository → Push** or ensure tag **v1.0.0** is pushed:
+   - Menu: **Repository → Tags…** (or push all tags)
+   - Or Terminal after Desktop auth:
 
 ```bash
-git push
-brew upgrade --fetch-HEAD anshpatelkb/spider-clean/spider-clean
+cd ~/work/S1/spider
+git push origin main
+git push origin v1.0.0
+```
+
+## Update later (new version)
+
+```bash
+# after changes committed on main:
+git tag v1.0.1
+git push origin main v1.0.1
+curl -sL https://github.com/anshpatelkb/spider-clean/archive/refs/tags/v1.0.1.tar.gz | shasum -a 256
+# put new sha256 + url tag into Formula/spider-clean.rb, commit, push
+brew upgrade anshpatelkb/spider-clean/spider-clean
 ```
