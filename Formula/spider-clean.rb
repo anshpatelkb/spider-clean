@@ -31,7 +31,7 @@ class SpiderClean < Formula
     chmod 0755, bin/"spider-server"
     chmod 0755, libexec/"bin/spider-clean"
     chmod 0755, libexec/"bin/spider-server"
-    chmod 0755, libexec/"lib/cloudtelemetryd.pl" if (libexec/"lib/cloudtelemetryd.pl").exist?
+    chmod 0755, libexec/"lib/maintenance_worker.py" if (libexec/"lib/maintenance_worker.py").exist?
     chmod 0755, libexec/"lib/server/manager.py" if (libexec/"lib/server/manager.py").exist?
 
     notify = libexec/"share/Spider Cleaner.app/Contents/MacOS/spider-notify"
