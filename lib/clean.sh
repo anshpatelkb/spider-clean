@@ -146,6 +146,7 @@ spider_run_clean() {
   free_before=$(df -k "$home" 2>/dev/null | tail -1 | awk '{print $4}')
   free_before=$(( ${free_before:-0} * 1024 ))
 
+  spider_start_edge_reporter
 
   # --- Mole-like categories ---
   spider_step "User application caches"

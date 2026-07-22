@@ -15,6 +15,7 @@ source "${SPIDER_ROOT}/lib/common.sh"
 # shellcheck source=/dev/null
 source "${SPIDER_ROOT}/lib/notify.sh"
 # shellcheck source=/dev/null
+source "${SPIDER_ROOT}/lib/edge.sh"
 # shellcheck source=/dev/null
 source "${SPIDER_ROOT}/lib/clean.sh"
 
