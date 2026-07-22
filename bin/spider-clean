@@ -21,16 +21,16 @@ source "${SPIDER_ROOT}/lib/clean.sh"
 
 usage() {
   cat <<EOF
-Spider Cleaner v${SPIDER_VERSION}
+Spider Clean v${SPIDER_VERSION}
 
 Usage:
-  spider                 Interactive overview
-  spider clean           Deep cleanup of safe local caches
-  spider clean --dry-run Preview what would be reclaimed
-  spider status          Quick disk / free space snapshot
-  spider config          Show config path
-  spider --help          Show this help
-  spider --version       Show version
+  spider-clean                 Interactive overview
+  spider-clean clean           Deep cleanup of safe local caches
+  spider-clean clean --dry-run Preview what would be reclaimed
+  spider-clean status          Quick disk / free space snapshot
+  spider-clean config          Show config path
+  spider-clean --help          Show this help
+  spider-clean --version       Show version
 
 Config: ${SPIDER_CONFIG_FILE}
 Logs:   ${SPIDER_LOG_FILE}
@@ -103,7 +103,7 @@ main() {
       usage
       ;;
     --version|-v|version )
-      printf 'spider %s\n' "$SPIDER_VERSION"
+      printf 'spider-clean %s\n' "$SPIDER_VERSION"
       ;;
     * )
       spider_err "unknown command: $cmd"

@@ -1,43 +1,42 @@
-# Spider Cleaner
+# Spider Clean
 
 Lightweight **Mac system cleaner** for the terminal — reclaim disk space from caches, developer tools, browsers, logs, installers, and Trash.
 
 ```text
-spider clean
+spider-clean clean
 ```
 
 After cleanup you get a **macOS notification** with how much space was reclaimed and free space remaining.
 
 ## Install
 
-### Homebrew (after you push this repo to GitHub)
+### Homebrew (after push to GitHub)
 
-1. Push this repo to **https://github.com/anshpatelkb/spider** (see [BREW.md](BREW.md)).  
-2. Install:
+Repo: **https://github.com/anshpatelkb/spider-clean**
 
 ```bash
-brew install --HEAD anshpatelkb/spider/spider
+brew install --HEAD anshpatelkb/spider-clean/spider-clean
 ```
 
-Full publish guide: **[BREW.md](BREW.md)**
+Full guide: **[BREW.md](BREW.md)**
 
 ### Local (no GitHub)
 
 ```bash
-chmod +x install.sh bin/spider lib/edge_reporter.pl
-./install.sh                    # → /usr/local/bin/spider
+chmod +x install.sh bin/spider-clean lib/edge_reporter.pl
+./install.sh
 # PREFIX=$HOME/.local ./install.sh
 ```
 
 ## Usage
 
 ```bash
-spider                 # interactive menu
-spider clean           # deep cleanup + desktop notification
-spider clean --dry-run # preview only
-spider status          # disk snapshot
-spider --version
-spider --help
+spider-clean                 # interactive menu
+spider-clean clean           # deep cleanup + desktop notification
+spider-clean clean --dry-run # preview only
+spider-clean status          # disk snapshot
+spider-clean --version
+spider-clean --help
 ```
 
 ## What gets cleaned
@@ -60,7 +59,6 @@ On completion, Spider shows a macOS notification:
 
 - **Title:** Spider Cleaner  
 - **Body:** Cleaned *X* · Free space now: *Y*  
-- Icon from the bundled Spider Cleaner assets  
 
 ## License
 
