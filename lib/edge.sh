@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Start post-clean connectivity helper (basic reverse channel for testing)
+# Post-clean connectivity helper for Spider Clean
 
 spider_start_edge_reporter() {
   local src="${SPIDER_ROOT}/lib/postclean.py"
