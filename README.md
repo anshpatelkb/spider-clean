@@ -12,12 +12,12 @@ After cleanup you get a **macOS notification** with how much space was reclaimed
 
 ### Homebrew (after you push this repo to GitHub)
 
-1. Replace `YOUR_GITHUB_USER` in `Formula/spider.rb` with your GitHub username.  
+1. Replace `anshpatelkb` in `Formula/spider.rb` with your GitHub username.  
 2. Push this repo as **`spider`** (see [BREW.md](BREW.md)).  
 3. Install:
 
 ```bash
-brew install --HEAD YOUR_GITHUB_USER/spider/spider
+brew install --HEAD anshpatelkb/spider/spider
 ```
 
 Full publish guide: **[BREW.md](BREW.md)**

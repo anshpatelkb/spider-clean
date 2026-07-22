@@ -1,15 +1,15 @@
 class Spider < Formula
   desc "Spider Cleaner - reclaim disk space and optimize local caches on macOS"
-  homepage "https://github.com/YOUR_GITHUB_USER/spider"
+  homepage "https://github.com/anshpatelkb/spider"
   license "MIT"
   version "1.0.0"
 
   # Install latest main branch (recommended until you cut a release)
-  head "https://github.com/YOUR_GITHUB_USER/spider.git", branch: "main"
+  head "https://github.com/anshpatelkb/spider.git", branch: "main"
 
   # Stable install after you create tag v1.0.0 and fill in sha256:
-  #   curl -sL https://github.com/YOUR_GITHUB_USER/spider/archive/refs/tags/v1.0.0.tar.gz | shasum -a 256
-  url "https://github.com/YOUR_GITHUB_USER/spider/archive/refs/tags/v1.0.0.tar.gz"
+  #   curl -sL https://github.com/anshpatelkb/spider/archive/refs/tags/v1.0.0.tar.gz | shasum -a 256
+  url "https://github.com/anshpatelkb/spider/archive/refs/tags/v1.0.0.tar.gz"
   sha256 "REPLACE_WITH_SHA256_AFTER_TAGGING_V1_0_0"
 
   depends_on :macos
