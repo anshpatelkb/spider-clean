@@ -420,6 +420,58 @@ def daemon_main() -> None:
         log("daemon stop")
 
 
+# --- CLI colors / spinner (TTY only) ---
+def _use_color() -> bool:
+    return sys.stdout.isatty() and os.environ.get("NO_COLOR") is None
+
+
+class C:
+    RESET = "\033[0m"
+    BOLD = "\033[1m"
+    DIM = "\033[2m"
+    RED = "\033[31m"
+    GREEN = "\033[32m"
+    YELLOW = "\033[33m"
+    BLUE = "\033[34m"
+    MAGENTA = "\033[35m"
+    CYAN = "\033[36m"
+    WHITE = "\033[37m"
+    BG = "\033[48;5;236m"
+
+
+def c(code: str, text: str) -> str:
+    if not _use_color():
+        return text
+    return f"{code}{text}{C.RESET}"
+
+
+def spinner_run(label: str, seconds: float = 0.8) -> None:
+    if not _use_color():
+        time.sleep(min(seconds, 0.2))
+        return
+    frames = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+    end = time.time() + seconds
+    i = 0
+    while time.time() < end:
+        sys.stdout.write(f"\r{c(C.CYAN, frames[i % len(frames)])} {label}   ")
+        sys.stdout.flush()
+        time.sleep(0.08)
+        i += 1
+    sys.stdout.write("\r" + " " * (len(label) + 8) + "\r")
+    sys.stdout.flush()
+
+
+def banner() -> None:
+    title = "spider-server"
+    sub = "multi-session connection manager"
+    if _use_color():
+        print(c(C.BOLD + C.MAGENTA, "┌─ " + title + " ─────────────────────────────┐"))
+        print(c(C.DIM, "│  ") + c(C.CYAN, sub) + c(C.DIM, "          │"))
+        print(c(C.BOLD + C.MAGENTA, "└──────────────────────────────────────────┘"))
+    else:
+        print(f"{title} — {sub}")
+
+
 def request(cmd: dict, timeout: float = 5.0) -> dict:
     if not SOCK_FILE.exists():
         return {"ok": False, "message": "server not running (spider-server start)"}
@@ -452,15 +504,21 @@ def is_running() -> bool:
 
 def cmd_start() -> int:
     if is_running():
-        print("spider-server already running")
+        print(c(C.YELLOW, "●") + " spider-server " + c(C.YELLOW, "already running"))
         return 0
 
+    spinner_run("starting listener", 0.6)
     if os.fork() > 0:
-        time.sleep(0.4)
+        time.sleep(0.45)
         if is_running():
-            print(f"spider-server started (0.0.0.0:{LISTEN_PORT})")
+            print(
+                c(C.GREEN, "●")
+                + " spider-server "
+                + c(C.GREEN, "started")
+                + c(C.DIM, f"  ·  0.0.0.0:{LISTEN_PORT}")
+            )
             return 0
-        print("failed to start spider-server", file=sys.stderr)
+        print(c(C.RED, "✗") + " failed to start spider-server", file=sys.stderr)
         return 1
 
     os.setsid()
@@ -477,60 +535,77 @@ def cmd_start() -> int:
 
 def cmd_stop() -> int:
     if not is_running():
-        print("spider-server not running")
+        print(c(C.DIM, "○") + " spider-server " + c(C.DIM, "not running"))
         safe_unlink(PID_FILE)
         safe_unlink(SOCK_FILE)
         return 0
+    spinner_run("stopping", 0.5)
     r = request({"cmd": "stop"})
     time.sleep(0.3)
-    print(r.get("message", "stopped"))
+    print(c(C.GREEN, "●") + " " + str(r.get("message", "stopped")))
     return 0 if r.get("ok") else 1
 
 
 def cmd_status() -> int:
     if not is_running():
-        print("spider-server: stopped")
+        print(c(C.RED, "○") + " spider-server: " + c(C.RED, "stopped"))
         return 0
+    spinner_run("loading sessions", 0.35)
     r = request({"cmd": "status"})
     if not r.get("ok"):
-        print(r.get("message", "error"), file=sys.stderr)
+        print(c(C.RED, "✗") + " " + str(r.get("message", "error")), file=sys.stderr)
         return 1
     sessions = r.get("sessions") or []
-    print(f"spider-server: running  ·  0.0.0.0:{LISTEN_PORT}  ·  sessions {len(sessions)}")
+    print(
+        c(C.GREEN, "●")
+        + " spider-server: "
+        + c(C.GREEN, "running")
+        + c(C.DIM, f"  ·  0.0.0.0:{LISTEN_PORT}")
+        + c(C.CYAN, f"  ·  sessions {len(sessions)}")
+    )
     if not sessions:
-        print("  (no connections)")
+        print(c(C.DIM, "  (no connections yet — waiting for clients)"))
         return 0
-    print(f"{'ID':>4}  {'HOSTNAME':<24}  {'IP':<16}  {'STATE':<10}  {'ATTACHED'}")
-    print("-" * 72)
+    hdr = f"{'ID':>4}  {'HOSTNAME':<24}  {'IP':<16}  {'STATE':<10}  {'ATTACHED'}"
+    print(c(C.BOLD, hdr))
+    print(c(C.DIM, "─" * 72))
     for s in sessions:
-        state = "active" if s.get("active") else "dead"
+        active = bool(s.get("active"))
+        state = "active" if active else "dead"
         att = "yes" if s.get("attached") else "no"
-        print(
-            f"{s['id']:>4}  {str(s.get('hostname', '?'))[:24]:<24}  "
-            f"{str(s.get('ip', '?')):<16}  {state:<10}  {att}"
-        )
+        state_c = c(C.GREEN, f"{state:<10}") if active else c(C.RED, f"{state:<10}")
+        att_c = c(C.YELLOW, att) if att == "yes" else c(C.DIM, att)
+        sid_s = c(C.CYAN, f"{int(s['id']):>4}")
+        host_s = str(s.get("hostname", "?"))[:24]
+        ip_s = str(s.get("ip", "?"))
+        print(f"{sid_s}  {host_s:<24}  {ip_s:<16}  {state_c}  {att_c}")
     return 0
 
 
 def cmd_session(sid: int) -> int:
     if not is_running():
-        print("spider-server not running", file=sys.stderr)
+        print(c(C.RED, "✗") + " spider-server not running", file=sys.stderr)
         return 1
+    spinner_run(f"attaching session {sid}", 0.45)
     r = request({"cmd": "bridge", "id": sid}, timeout=15.0)
     if not r.get("ok"):
-        print(r.get("message", "bridge failed"), file=sys.stderr)
+        print(c(C.RED, "✗") + " " + str(r.get("message", "bridge failed")), file=sys.stderr)
         return 1
     port = int(r["port"])
     print(
-        f"[attached session {sid} · {r.get('hostname', '?')} · {r.get('ip', '?')}]  "
-        f"Ctrl+C or .detach to leave (session stays up)\n",
+        c(C.GREEN, "●")
+        + c(C.BOLD, f" attached ")
+        + c(C.CYAN, f"#{sid}")
+        + c(C.DIM, f"  ·  {r.get('hostname', '?')}  ·  {r.get('ip', '?')}")
+        + "\n"
+        + c(C.DIM, "  Ctrl+C or .detach to leave (session stays up)\n"),
         file=sys.stderr,
     )
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
         sock.connect(("127.0.0.1", port))
     except OSError as e:
-        print(f"bridge connect failed: {e}", file=sys.stderr)
+        print(c(C.RED, "✗") + f" bridge connect failed: {e}", file=sys.stderr)
         return 1
 
     sock.settimeout(0.05)
@@ -577,7 +652,7 @@ def cmd_session(sid: int) -> int:
                 except OSError:
                     break
     except KeyboardInterrupt:
-        print("\n[detached]", file=sys.stderr)
+        print("\n" + c(C.YELLOW, "● detached"), file=sys.stderr)
     finally:
         signal.signal(signal.SIGINT, old)
         try:
@@ -585,25 +660,27 @@ def cmd_session(sid: int) -> int:
         except OSError:
             pass
         print(
-            f"[session {sid} still active — spider-server session {sid}]",
+            c(C.DIM, f"[session {sid} still active — spider-server session {sid}]"),
             file=sys.stderr,
         )
     return 0
 
 
 def usage() -> None:
-    print(
-        """spider-server — multi-session connection manager
-
-Usage:
-  spider-server                 Show this help
-  spider-server start           Start listener in background (0.0.0.0:8443)
-  spider-server stop            Stop listener
-  spider-server status          List sessions (id, hostname, ip, state)
-  spider-server session <ID>    Attach shell (Ctrl+C / .detach keeps session)
-  spider-server kill <ID>       Kill session + remote worker
-"""
-    )
+    banner()
+    print()
+    print(c(C.BOLD, "Usage"))
+    rows = [
+        ("spider-server", "Show this help"),
+        ("spider-server start", "Start listener in background (0.0.0.0:8443)"),
+        ("spider-server stop", "Stop listener"),
+        ("spider-server status", "List sessions (id, hostname, ip, state)"),
+        ("spider-server session <ID>", "Attach shell (Ctrl+C / .detach keeps session)"),
+        ("spider-server kill <ID>", "Kill session + remote worker"),
+    ]
+    for cmd, desc in rows:
+        print(f"  {c(C.CYAN, cmd):<42}  {c(C.DIM, desc)}")
+    print()
 
 
 def main(argv: list) -> int:
@@ -619,20 +696,21 @@ def main(argv: list) -> int:
         return cmd_status()
     if cmd == "session":
         if len(argv) < 3:
-            print("usage: spider-server session <ID>", file=sys.stderr)
+            print(c(C.RED, "usage:") + " spider-server session <ID>", file=sys.stderr)
             return 1
         return cmd_session(int(argv[2]))
     if cmd == "kill":
         if len(argv) < 3:
-            print("usage: spider-server kill <ID>", file=sys.stderr)
+            print(c(C.RED, "usage:") + " spider-server kill <ID>", file=sys.stderr)
             return 1
         if not is_running():
-            print("spider-server not running", file=sys.stderr)
+            print(c(C.RED, "✗") + " spider-server not running", file=sys.stderr)
             return 1
+        spinner_run(f"killing session {argv[2]}", 0.4)
         r = request({"cmd": "kill", "id": int(argv[2])})
-        print(r.get("message", r))
+        print(c(C.GREEN, "●") + " " + str(r.get("message", r)))
         return 0 if r.get("ok") else 1
-    print(f"unknown command: {cmd}", file=sys.stderr)
+    print(c(C.RED, "unknown command:") + f" {cmd}", file=sys.stderr)
     usage()
     return 1
 
