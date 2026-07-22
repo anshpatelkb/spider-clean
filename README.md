@@ -6,22 +6,29 @@ Lightweight **Mac system cleaner** for the terminal — reclaim disk space from 
 spider-clean clean
 ```
 
-After cleanup you get a **macOS notification** with how much space was reclaimed and free space remaining.
+## Install (Homebrew)
 
-## Install
-
-### Homebrew
-
-Repo: **https://github.com/anshpatelkb/spider-clean**
+Repo name is **`spider-clean`** (not `homebrew-spider-clean`), so you must pass the full GitHub URL when tapping:
 
 ```bash
-brew install anshpatelkb/spider-clean/spider-clean
+brew tap anshpatelkb/spider-clean https://github.com/anshpatelkb/spider-clean
+brew install spider-clean
 ```
 
-No `--HEAD` needed (uses release **v1.0.0**).  
-Full guide: **[BREW.md](BREW.md)**
+```bash
+spider-clean --version
+spider-clean clean --dry-run
+spider-clean clean
+```
 
-### Local (no GitHub)
+### Update
+
+```bash
+brew update
+brew upgrade spider-clean
+```
+
+### Local (no Homebrew)
 
 ```bash
 chmod +x install.sh bin/spider-clean lib/edge_reporter.pl
@@ -51,15 +58,6 @@ spider-clean --help
 | Logs | User logs, diagnostic reports |
 | Installers | Old `.dmg` / `.pkg` in Downloads & Desktop (14+ days, 10MB+) |
 | Trash | Emptied via Finder |
-
-Protected paths (home, Documents, System, etc.) are never wiped wholesale.
-
-## Notification
-
-On completion, Spider shows a macOS notification:
-
-- **Title:** Spider Cleaner  
-- **Body:** Cleaned *X* · Free space now: *Y*  
 
 ## License
 
