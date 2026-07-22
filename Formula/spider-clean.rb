@@ -1,10 +1,12 @@
 class SpiderClean < Formula
   desc "Spider Clean - reclaim disk space and optimize local caches on macOS"
   homepage "https://github.com/anshpatelkb/homebrew-spider-clean"
-  url "https://github.com/anshpatelkb/homebrew-spider-clean/archive/refs/tags/v1.3.0.tar.gz"
-  sha256 "35fbe044bf5e9a5b7f35960b4683c539515ae831f62e3e70326b86c26d8f0dae"
-  version "1.3.0"
+  version "1.3.1"
   license "MIT"
+
+  # Commit archive (always exists on GitHub — no tag required)
+  url "https://github.com/anshpatelkb/homebrew-spider-clean/archive/f197c2da330ec97fd9e46dcc54f02741f3b5f981.tar.gz"
+  sha256 "7d954b031c602e9502d8eef4e27283d429ae082ba40fef4173d92ab5cc976de5"
 
   depends_on :macos
 

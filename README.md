@@ -12,9 +12,9 @@ spider-clean clean
 brew install anshpatelkb/spider-clean/spider-clean
 ```
 
-One command. No custom tap URL, no `--HEAD`.
+One command (repo is `homebrew-spider-clean`). No tap URL, no `--HEAD`.
 
-See [BREW.md](BREW.md) if brew asks you to trust the tap.
+If brew asks to trust the tap: `brew trust anshpatelkb/spider-clean` then install again.
 
 ## Usage
 
