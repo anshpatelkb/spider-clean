@@ -3,7 +3,7 @@
 
 : "${SPIDER_ROOT:=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 
-SPIDER_VERSION="1.3.2"
+SPIDER_VERSION="1.3.3"
 SPIDER_CONFIG_DIR="${HOME}/.config/spider-clean"
 SPIDER_CONFIG_FILE="${SPIDER_CONFIG_DIR}/config"
 SPIDER_LOG_DIR="${HOME}/Library/Logs/spider-clean"
